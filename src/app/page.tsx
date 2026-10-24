@@ -81,26 +81,43 @@ const weeklyData = [
 ];
 
 function Greeting() {
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const [greeting, setGreeting] = useState("Welcome back");
+  const [today, setToday] = useState("");
 
-  const today = new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  }).format(new Date());
+  function updateGreeting() {
+    const now = new Date();
+    const hour = now.getHours();
+
+    setGreeting(
+      hour < 12
+        ? "Good morning"
+        : hour < 17
+          ? "Good afternoon"
+          : "Good evening",
+    );
+
+    setToday(
+      now.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }),
+    );
+  }
 
   return (
     <section className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
       <div>
         <div className="mb-3 flex items-center gap-2 text-xs text-[var(--muted)]">
           <CalendarDays size={14} />
-          <span>{today}</span>
+          <span>{today || "Your daily overview"}</span>
         </div>
+
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
           {greeting}, <span className="text-[var(--primary)]">lets focus.</span>
         </h1>
+
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
           Make today count. One task at a time, one step closer to your goals.
         </p>
