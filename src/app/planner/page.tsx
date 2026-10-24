@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, MouseEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 
 type PlannerEvent = {
   id: string;
@@ -23,81 +25,157 @@ type PlannerEvent = {
 
 const colors = ["#A78BFA", "#60A5FA", "#6EE7B7", "#FBBF77", "#FB7185"];
 
-function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function getWeekStart(date: Date) {
-  const start = new Date(date);
-  const day = start.getDay();
-  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-  start.setHours(0, 0, 0, 0);
-  return start;
-}
-
-function shiftDate(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-const initialEvents: PlannerEvent[] = [
-  {
-    id: "e1",
-    title: "Morning planning",
-    date: dateKey(new Date()),
-    time: "09:00",
-    category: "Planning",
-    color: colors[0],
-  },
-  {
-    id: "e2",
-    title: "Deep work session",
-    date: dateKey(new Date()),
-    time: "11:00",
-    category: "Focus",
-    color: colors[1],
-  },
-  {
-    id: "e3",
-    title: "Review weekly goals",
-    date: dateKey(shiftDate(new Date(), 1)),
-    time: "14:00",
-    category: "Personal",
-    color: colors[2],
-  },
-];
-
 const emptyForm = {
   title: "",
   time: "09:00",
   category: "Focus",
 };
 
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekStart(date: Date): Date {
+  const start = new Date(date);
+  const day = start.getDay();
+
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  start.setHours(0, 0, 0, 0);
+
+  return start;
+}
+
+function shiftDate(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+
+  return next;
+}
+
+function createInitialEvents(): PlannerEvent[] {
+  const today = new Date();
+
+  return [
+    {
+      id: "e1",
+      title: "Morning planning",
+      date: dateKey(today),
+      time: "09:00",
+      category: "Planning",
+      color: colors[0],
+    },
+    {
+      id: "e2",
+      title: "Deep work session",
+      date: dateKey(today),
+      time: "11:00",
+      category: "Focus",
+      color: colors[1],
+    },
+    {
+      id: "e3",
+      title: "Review weekly goals",
+      date: dateKey(shiftDate(today, 1)),
+      time: "14:00",
+      category: "Personal",
+      color: colors[2],
+    },
+  ];
+}
+
 export default function PlannerPage() {
-  const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
-  const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
-  const [events, setEvents] = useState(initialEvents);
+  const [weekStart, setWeekStart] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [todayKey, setTodayKey] = useState("");
+
+  const [events, setEvents, storageReady] = useLocalStorage<PlannerEvent[]>(
+    "focusflow.planner.events",
+    [],
+  );
+
+  const eventsInitialized = useRef(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
 
-  const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index)),
-    [weekStart],
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const today = new Date();
+      const currentDateKey = dateKey(today);
+
+      setWeekStart(getWeekStart(today));
+      setSelectedDate(currentDateKey);
+      setTodayKey(currentDateKey);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady || eventsInitialized.current) return;
+
+    const timer = window.setTimeout(() => {
+      eventsInitialized.current = true;
+
+      if (events.length === 0) {
+        setEvents(createInitialEvents());
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [storageReady, events.length, setEvents]);
+
+  const weekDays = useMemo(() => {
+    if (!weekStart) return [];
+
+    return Array.from({ length: 7 }, (_, index) => shiftDate(weekStart, index));
+  }, [weekStart]);
+
+  const selectedEvents = useMemo(
+    () =>
+      events
+        .filter((event: PlannerEvent) => event.date === selectedDate)
+        .sort((a: PlannerEvent, b: PlannerEvent) =>
+          a.time.localeCompare(b.time),
+        ),
+    [events, selectedDate],
   );
 
-  const selectedEvents = events
-    .filter((event) => event.date === selectedDate)
-    .sort((a, b) => a.time.localeCompare(b.time));
+  const monthLabel = weekStart
+    ? new Intl.DateTimeFormat("en-US", {
+        month: "long",
+        year: "numeric",
+      }).format(weekStart)
+    : "Loading calendar…";
+
+  const selectedDateLabel = selectedDate
+    ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "Loading schedule…";
 
   function changeWeek(amount: number) {
+    if (!weekStart) return;
+
     const next = shiftDate(weekStart, amount * 7);
+
     setWeekStart(next);
     setSelectedDate(dateKey(next));
+  }
+
+  function goToToday() {
+    const today = new Date();
+    const currentDateKey = dateKey(today);
+
+    setWeekStart(getWeekStart(today));
+    setSelectedDate(currentDateKey);
+    setTodayKey(currentDateKey);
   }
 
   function openCreateEvent() {
@@ -106,8 +184,9 @@ export default function PlannerPage() {
     setModalOpen(true);
   }
 
-  function saveEvent(event: React.FormEvent<HTMLFormElement>) {
+  function saveEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
     const title = form.title.trim();
 
     if (!title) {
@@ -115,17 +194,21 @@ export default function PlannerPage() {
       return;
     }
 
-    setEvents((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        title,
-        date: selectedDate,
-        time: form.time,
-        category: form.category,
-        color: colors[current.length % colors.length],
-      },
-    ]);
+    if (!selectedDate) {
+      setError("Please wait for the planner to finish loading.");
+      return;
+    }
+
+    const newEvent: PlannerEvent = {
+      id: crypto.randomUUID(),
+      title,
+      date: selectedDate,
+      time: form.time,
+      category: form.category,
+      color: colors[events.length % colors.length],
+    };
+
+    setEvents((current: PlannerEvent[]) => [...current, newEvent]);
 
     setModalOpen(false);
     setForm(emptyForm);
@@ -133,21 +216,16 @@ export default function PlannerPage() {
   }
 
   function deleteEvent(id: string) {
-    setEvents((current) => current.filter((event) => event.id !== id));
+    setEvents((current: PlannerEvent[]) =>
+      current.filter((event: PlannerEvent) => event.id !== id),
+    );
   }
 
-  const monthLabel = new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-  }).format(weekStart);
-
-  const selectedDateLabel = new Date(
-    `${selectedDate}T12:00:00`,
-  ).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  function handleBackdropClick(event: MouseEvent<HTMLDivElement>) {
+    if (event.target === event.currentTarget) {
+      setModalOpen(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -164,12 +242,15 @@ export default function PlannerPage() {
               Give your priorities a place in your week.
             </p>
           </div>
+
           <button
             type="button"
             onClick={openCreateEvent}
-            className="inline-flex w-fit items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-3 text-sm font-semibold text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)]"
+            disabled={!selectedDate}
+            className="inline-flex w-fit items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-3 text-sm font-semibold text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Plus size={17} /> Add plan
+            <Plus size={17} />
+            Add plan
           </button>
         </header>
 
@@ -181,14 +262,11 @@ export default function PlannerPage() {
                 Select a day to view and manage its schedule.
               </p>
             </div>
+
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  const today = new Date();
-                  setWeekStart(getWeekStart(today));
-                  setSelectedDate(dateKey(today));
-                }}
+                onClick={goToToday}
                 className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs hover:bg-white/[0.04]"
               >
                 Today
@@ -197,7 +275,8 @@ export default function PlannerPage() {
                 type="button"
                 aria-label="Previous week"
                 onClick={() => changeWeek(-1)}
-                className="rounded-lg border border-[var(--border)] p-2 hover:bg-white/[0.04]"
+                disabled={!weekStart}
+                className="rounded-lg border border-[var(--border)] p-2 hover:bg-white/[0.04] disabled:opacity-50"
               >
                 <ArrowLeft size={16} />
               </button>
@@ -205,7 +284,8 @@ export default function PlannerPage() {
                 type="button"
                 aria-label="Next week"
                 onClick={() => changeWeek(1)}
-                className="rounded-lg border border-[var(--border)] p-2 hover:bg-white/[0.04]"
+                disabled={!weekStart}
+                className="rounded-lg border border-[var(--border)] p-2 hover:bg-white/[0.04] disabled:opacity-50"
               >
                 <ArrowRight size={16} />
               </button>
@@ -213,17 +293,20 @@ export default function PlannerPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            {weekDays.map((day) => {
+            {weekDays.map((day: Date) => {
               const key = dateKey(day);
               const selected = key === selectedDate;
-              const isToday = key === dateKey(new Date());
-              const count = events.filter((event) => event.date === key).length;
+              const isToday = key === todayKey;
+              const count = events.filter(
+                (event: PlannerEvent) => event.date === key,
+              ).length;
 
               return (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setSelectedDate(key)}
+                  aria-pressed={selected}
                   className={`rounded-xl border p-3 text-left transition-colors sm:p-4 ${
                     selected
                       ? "border-[var(--primary)]/50 bg-[var(--primary)]/10"
@@ -235,6 +318,7 @@ export default function PlannerPage() {
                       weekday: "short",
                     }).format(day)}
                   </span>
+
                   <span
                     className={`mt-2 block text-xl font-semibold ${
                       selected ? "text-[var(--primary)]" : ""
@@ -242,14 +326,16 @@ export default function PlannerPage() {
                   >
                     {day.getDate()}
                   </span>
+
                   <span className="mt-3 flex items-center gap-1.5 text-[10px] text-[var(--muted)]">
                     <span
                       className={`size-1.5 rounded-full ${
                         count ? "bg-[var(--primary)]" : "bg-white/15"
                       }`}
                     />
-                    {count} plans
+                    {count} {count === 1 ? "plan" : "plans"}
                   </span>
+
                   {isToday && (
                     <span className="mt-2 inline-block rounded-md bg-[var(--primary)]/10 px-1.5 py-0.5 text-[9px] text-[var(--primary)]">
                       TODAY
@@ -270,18 +356,21 @@ export default function PlannerPage() {
                 {selectedEvents.length === 1 ? "item" : "items"}
               </p>
             </div>
+
             <button
               type="button"
               onClick={openCreateEvent}
-              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2.5 text-xs font-medium hover:bg-white/[0.04]"
+              disabled={!selectedDate}
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-3 py-2.5 text-xs font-medium hover:bg-white/[0.04] disabled:opacity-50"
             >
-              <Plus size={14} /> Add to this day
+              <Plus size={14} />
+              Add to this day
             </button>
           </div>
 
-          {selectedEvents.length ? (
+          {selectedEvents.length > 0 ? (
             <div className="space-y-3">
-              {selectedEvents.map((event) => (
+              {selectedEvents.map((event: PlannerEvent) => (
                 <article
                   key={event.id}
                   className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-black/[0.05] p-4 sm:flex-row sm:items-center"
@@ -290,16 +379,19 @@ export default function PlannerPage() {
                     <Clock3 size={14} />
                     {event.time}
                   </div>
+
                   <div
                     className="h-1 self-stretch rounded-full sm:h-10 sm:w-1"
                     style={{ backgroundColor: event.color }}
                   />
+
                   <div className="min-w-0 flex-1">
                     <h3 className="text-sm font-medium">{event.title}</h3>
                     <p className="mt-1 text-xs text-[var(--muted)]">
                       {event.category}
                     </p>
                   </div>
+
                   <button
                     type="button"
                     onClick={() => deleteEvent(event.id)}
@@ -321,7 +413,8 @@ export default function PlannerPage() {
               <button
                 type="button"
                 onClick={openCreateEvent}
-                className="mt-4 text-xs font-medium text-[var(--primary)] hover:text-[var(--primary-hover)]"
+                disabled={!selectedDate}
+                className="mt-4 text-xs font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] disabled:opacity-50"
               >
                 Add your first plan
               </button>
@@ -330,7 +423,10 @@ export default function PlannerPage() {
         </section>
 
         {modalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            onClick={handleBackdropClick}
+          >
             <form
               onSubmit={saveEvent}
               className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[#191a25] p-5 shadow-2xl sm:p-6"
@@ -342,6 +438,7 @@ export default function PlannerPage() {
                     {selectedDateLabel}
                   </p>
                 </div>
+
                 <button
                   type="button"
                   aria-label="Close"
